@@ -15,92 +15,94 @@ import (
 	"plans-backend/internal/telegram"
 )
 
-// phoneE164 validates E.164: +<1-3 country digits><6-12 local digits>
-var phoneE164 = regexp.MustCompile(`^\+[1-9]\d{6,14}$`)
+// phoneBasic: минимум 6 символов, только цифры/+/-/пробел
+var phoneBasic = regexp.MustCompile(`^[\d\s\+\-\(\)]{6,20}$`)
 
-// ── Package-level dependencies (injected from main.go) ───────────────────────
+// ── Зависимости (устанавливаются в main.go) ───────────────────────────────────
 
 var (
-	OTPStore    *otp.Store
-	TelegramBot *telegram.Bot
-	PhoneChatIDs = &chatIDStore{}
+	OTPStore     *otp.Store
+	TelegramBot  *telegram.Bot
+	PhoneChatIDs = &chatIDStore{} // резервный in-memory fallback
 )
 
-// ── Request / response types ──────────────────────────────────────────────────
+// ── Типы запросов ─────────────────────────────────────────────────────────────
 
 type sendCodeReq struct {
-	Phone string `json:"phone"`
+	Phone      string `json:"phone"`
+	Name       string `json:"name"`
+	TelegramID int64  `json:"telegram_id"`
 }
 
 type verifyCodeReq struct {
 	Phone string `json:"phone"`
 	Code  string `json:"code"`
+	Name  string `json:"name"`
 }
 
-type authResponse struct {
-	Token string       `json:"token"`
-	User  *models.User `json:"user"`
-}
-
-// ── Step 1: POST /auth/phone/send ─────────────────────────────────────────────
+// ── POST /auth/send-code ──────────────────────────────────────────────────────
 //
-// Validates phone, checks that the number is linked to a Telegram chat,
-// generates a 6-digit OTP and sends it via the bot.
+// Принимает phone + name + telegram_id (chat_id бота).
+// Валидирует номер, сохраняет chat_id, генерирует OTP и отправляет в Telegram.
 
-func AuthPhoneSend(w http.ResponseWriter, r *http.Request) {
+func AuthSendCode(w http.ResponseWriter, r *http.Request) {
 	var req sendCodeReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonErr(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	phone := telegram.NormalizePhone(req.Phone)
-	if !phoneE164.MatchString(phone) {
-		jsonErr(w, "invalid phone number — use E.164 format, e.g. +79991234567", http.StatusBadRequest)
+	phone := normalizePhone(req.Phone)
+	if !phoneBasic.MatchString(phone) {
+		jsonErr(w, "введи корректный номер телефона", http.StatusBadRequest)
 		return
 	}
 
-	chatID, linked := PhoneChatIDs.Get(phone)
-	if !linked {
-		jsonErr(w,
-			"phone not linked to Telegram — open our bot and send: /start "+phone,
-			http.StatusUnprocessableEntity,
-		)
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		jsonErr(w, "введи своё имя", http.StatusBadRequest)
 		return
 	}
+
+	if req.TelegramID == 0 {
+		jsonErr(w, "введи Telegram ID", http.StatusBadRequest)
+		return
+	}
+
+	// Сохраняем chat_id для этого номера
+	PhoneChatIDs.Set(phone, req.TelegramID)
 
 	code, err := OTPStore.Generate(phone)
 	if err != nil {
-		log.Printf("[auth] otp generate error: %v", err)
+		log.Printf("[auth] otp generate: %v", err)
 		jsonErr(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	msg := "🔐 Ваш код входа: *" + code + "*\n\nДействителен 5 минут. Никому не сообщайте."
-	if err := TelegramBot.SendMessage(chatID, msg); err != nil {
-		log.Printf("[auth] telegram send error phone=%s chat_id=%d: %v", phone, chatID, err)
-		jsonErr(w, "failed to send code via Telegram", http.StatusInternalServerError)
+	msg := "🔐 Ваш код входа в Plans: *" + code + "*\n\nДействителен 5 минут. Никому не сообщайте."
+	if err := TelegramBot.SendMessage(req.TelegramID, msg); err != nil {
+		log.Printf("[auth] telegram send error phone=%s chat_id=%d: %v", phone, req.TelegramID, err)
+		jsonErr(w, "не удалось отправить код в Telegram — проверь правильность Telegram ID", http.StatusUnprocessableEntity)
 		return
 	}
 
-	log.Printf("[auth] OTP sent phone=%s chat_id=%d", phone, chatID)
-	jsonOK(w, map[string]string{"message": "code sent to your Telegram"})
+	log.Printf("[auth] OTP sent phone=%s chat_id=%d", phone, req.TelegramID)
+	jsonOK(w, map[string]string{"message": "код отправлен в Telegram"})
 }
 
-// ── Step 2: POST /auth/phone/verify ──────────────────────────────────────────
+// ── POST /auth/verify-code ────────────────────────────────────────────────────
 //
-// Verifies the OTP, then finds or creates the user in the DB,
-// updates telegram_chat_id, and returns a JWT.
+// Проверяет OTP, создаёт/находит пользователя, возвращает JWT.
 
-func AuthPhoneVerify(w http.ResponseWriter, r *http.Request) {
+func AuthVerifyCode(w http.ResponseWriter, r *http.Request) {
 	var req verifyCodeReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonErr(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	phone := telegram.NormalizePhone(req.Phone)
-	if !phoneE164.MatchString(phone) {
+	phone := normalizePhone(req.Phone)
+	if !phoneBasic.MatchString(phone) {
 		jsonErr(w, "invalid phone number", http.StatusBadRequest)
 		return
 	}
@@ -112,44 +114,74 @@ func AuthPhoneVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !OTPStore.Verify(phone, code) {
-		jsonErr(w, "invalid or expired code", http.StatusUnauthorized)
+		jsonErr(w, "неверный или устаревший код", http.StatusUnauthorized)
 		return
 	}
 
-	handlePhoneAuth(w, phone)
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "Пользователь"
+	}
+
+	chatID, _ := PhoneChatIDs.Get(phone)
+	upsertAndRespond(w, phone, name, chatID)
 }
 
-// handlePhoneAuth finds or creates a user by phone, links telegram_chat_id,
-// and writes a JWT response. Called after successful OTP verification.
-func handlePhoneAuth(w http.ResponseWriter, phone string) {
-	chatID, _ := PhoneChatIDs.Get(phone)
-
-	// Upsert user: insert if not exists, always update telegram_chat_id
+// upsertAndRespond — создаёт или обновляет пользователя в БД, возвращает JWT
+func upsertAndRespond(w http.ResponseWriter, phone, name string, chatID int64) {
 	var user models.User
 	err := db.DB.QueryRowx(`
-		INSERT INTO users (phone, telegram_chat_id)
-		VALUES ($1, $2)
+		INSERT INTO users (phone, username, telegram_chat_id)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (phone) DO UPDATE
-		  SET telegram_chat_id = EXCLUDED.telegram_chat_id
+		  SET username          = COALESCE(EXCLUDED.username, users.username),
+		      telegram_chat_id  = COALESCE(NULLIF(EXCLUDED.telegram_chat_id, 0), users.telegram_chat_id)
 		RETURNING id, phone, username, telegram_chat_id, created_at
-	`, phone, chatID).StructScan(&user)
+	`, phone, name, chatID).StructScan(&user)
 	if err != nil {
-		log.Printf("[auth] db upsert error phone=%s: %v", phone, err)
+		log.Printf("[auth] db upsert phone=%s: %v", phone, err)
 		jsonErr(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	token, err := auth.GenerateToken(user.ID)
 	if err != nil {
-		log.Printf("[auth] token generate error: %v", err)
+		log.Printf("[auth] generate token: %v", err)
 		jsonErr(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	jsonOK(w, authResponse{Token: token, User: &user})
+	// Фронт ожидает поле "name" в user — маппим из username
+	type userResp struct {
+		ID    string  `json:"id"`
+		Phone string  `json:"phone"`
+		Name  *string `json:"name"`
+	}
+	jsonOK(w, map[string]interface{}{
+		"token": token,
+		"user": userResp{
+			ID:    user.ID,
+			Phone: user.Phone,
+			Name:  user.Username,
+		},
+	})
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+func normalizePhone(raw string) string {
+	raw = strings.TrimSpace(raw)
+	// Убираем всё кроме цифр и +
+	var b strings.Builder
+	for i, ch := range raw {
+		if ch == '+' && i == 0 {
+			b.WriteRune(ch)
+		} else if ch >= '0' && ch <= '9' {
+			b.WriteRune(ch)
+		}
+	}
+	return b.String()
+}
 
 func jsonErr(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
@@ -163,11 +195,6 @@ func jsonOK(w http.ResponseWriter, v interface{}) {
 }
 
 // ── chatIDStore ───────────────────────────────────────────────────────────────
-// Thread-safe in-memory phone → chat_id map.
-// Populated when user sends /start <phone> to the Telegram bot.
-//
-// ⚠️  For production with multiple instances or restarts:
-//     replace Get/Set with DB queries on the users.telegram_chat_id column.
 
 type chatIDStore struct {
 	mu sync.RWMutex
