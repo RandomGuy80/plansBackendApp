@@ -18,7 +18,7 @@ import (
 func main() {
 	db.Connect()
 
-	// ── Telegram bot ──────────────────────────────────────────────────────────
+	// Telegram bot
 	tgToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if tgToken == "" {
 		log.Fatal("TELEGRAM_BOT_TOKEN env variable is required")
@@ -27,7 +27,6 @@ func main() {
 	handlers.TelegramBot = bot
 	handlers.OTPStore = otp.NewStore()
 
-	// ── Router ────────────────────────────────────────────────────────────────
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.Logger)
 	r.Use(chiMiddleware.Recoverer)
@@ -44,18 +43,8 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Telegram webhook — вызывается Telegram когда пользователь пишет боту.
-	// Зарегистрируй webhook один раз:
-	// GET https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://yourdomain/tg/webhook
-	r.Post("/tg/webhook", bot.WebhookHandler(func(phone string, chatID int64) {
-		handlers.PhoneChatIDs.Set(phone, chatID)
-		log.Printf("[tg] linked phone=%s chat_id=%d", phone, chatID)
-	}))
-
-	// Phone auth — двухшаговая
-	r.Post("/auth/phone/send", handlers.AuthPhoneSend)     // 1. отправить OTP
-	r.Post("/auth/phone/verify", handlers.AuthPhoneVerify) // 2. проверить OTP → JWT
-
+	r.Post("/auth/send-code", handlers.AuthSendCode)   // step 1: отправить OTP в TG
+	r.Post("/auth/verify-code", handlers.AuthVerifyCode) // step 2: проверить OTP → JWT
 	r.Post("/auth/google", handlers.AuthGoogle)
 
 	// ── Protected ─────────────────────────────────────────────────────────────
@@ -66,6 +55,7 @@ func main() {
 		r.Patch("/me", handlers.UpdateMe)
 		r.Get("/users/{username}", handlers.GetUserByUsername)
 
+		// IMPORTANT: /meetings/my должен быть до /meetings/{id}
 		r.Get("/meetings/my", handlers.GetMyMeetings)
 		r.Get("/meetings", handlers.GetMeetings)
 		r.Post("/meetings", handlers.CreateMeeting)
