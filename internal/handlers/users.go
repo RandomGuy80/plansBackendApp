@@ -64,3 +64,16 @@ func GetUserByUsername(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonOK(w, u)
 }
+
+// DELETE /me
+func DeleteMe(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(middleware.UserIDKey).(string)
+
+	// Каскадно удалятся meetings и meeting_members (ON DELETE CASCADE в миграции)
+	_, err := db.DB.Exec(`DELETE FROM users WHERE id = $1`, userID)
+	if err != nil {
+		jsonErr(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -53,6 +53,7 @@ func main() {
 
 		r.Get("/me", handlers.GetMe)
 		r.Patch("/me", handlers.UpdateMe)
+		r.Delete("/me", handlers.DeleteMe)
 		r.Get("/users/{username}", handlers.GetUserByUsername)
 
 		// IMPORTANT: /meetings/my должен быть до /meetings/{id}
