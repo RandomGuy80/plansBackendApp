@@ -3,22 +3,19 @@ WORKDIR /app
 
 RUN apk add --no-cache git ca-certificates
 
+# Completely disable Go module checksum verification
+RUN go env -w GONOSUMCHECK=* && \
+    go env -w GONOSUMDB=* && \
+    go env -w GOFLAGS=-mod=mod && \
+    go env -w GOPRIVATE=*
+
 COPY go.mod ./
+RUN rm -f go.sum
 
-# Disable checksum verification completely
-ENV GONOSUMCHECK=*
-ENV GONOSUMDB=*
-ENV GOPRIVATE=*
-ENV GOFLAGS=-mod=mod
-ENV GONOSUMCHECK=*
-
-# Download dependencies (no go.sum needed)
-RUN GONOSUMCHECK=* GONOSUMDB=* GOFLAGS=-mod=mod go mod download
+RUN go mod download
 
 COPY . .
-
-# Build (skip go.sum entirely)
-RUN GONOSUMCHECK=* GONOSUMDB=* CGO_ENABLED=0 GOOS=linux go build -mod=mod -o server ./cmd/main.go
+RUN rm -f go.sum && CGO_ENABLED=0 GOOS=linux go build -mod=mod -o server ./cmd/main.go
 
 FROM alpine:3.19
 RUN apk --no-cache add ca-certificates tzdata
