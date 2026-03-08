@@ -120,6 +120,7 @@ func sendWebPush(sub PushSubscription, payload PushPayload) {
 		Urgency:         webpush.UrgencyNormal,
 		VAPIDPublicKey:  os.Getenv("VAPID_PUBLIC_KEY"),
 		VAPIDPrivateKey: os.Getenv("VAPID_PRIVATE_KEY"),
+		Subscriber:      "mailto:gridin722@gmail.com",
 	})
 	if err != nil {
 		log.Printf("[push] send error: %v", err)
