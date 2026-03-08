@@ -3,16 +3,12 @@ WORKDIR /app
 
 RUN apk add --no-cache git ca-certificates
 
-# Completely disable Go module checksum verification
-RUN go env -w GONOSUMCHECK=* && \
-    go env -w GONOSUMDB=* && \
+RUN go env -w GONOSUMDB=* && \
     go env -w GOFLAGS=-mod=mod && \
     go env -w GOPRIVATE=*
 
 COPY go.mod ./
-RUN rm -f go.sum
-
-RUN go mod download
+RUN rm -f go.sum && go mod download
 
 COPY . .
 RUN rm -f go.sum && CGO_ENABLED=0 GOOS=linux go build -mod=mod -o server ./cmd/main.go
