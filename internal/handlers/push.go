@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 
@@ -117,6 +118,8 @@ func sendWebPush(sub PushSubscription, payload PushPayload) {
 	resp, err := webpush.SendNotification(body, s, &webpush.Options{
 		TTL:             86400,
 		Urgency:         webpush.UrgencyNormal,
+		VAPIDPublicKey:  os.Getenv("VAPID_PUBLIC_KEY"),
+		VAPIDPrivateKey: os.Getenv("VAPID_PRIVATE_KEY"),
 	})
 	if err != nil {
 		log.Printf("[push] send error: %v", err)
