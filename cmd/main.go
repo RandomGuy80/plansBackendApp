@@ -17,29 +17,23 @@ import (
 )
 
 func main() {
-	// ── Init DB ───────────────────────────────────────────────────────────────
 	db.Connect()
 
-	// ── Init OTP store ────────────────────────────────────────────────────────
 	handlers.OTPStore = otp.NewStore()
 
-	// ── Init Telegram bot ─────────────────────────────────────────────────────
 	tgToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if tgToken == "" {
 		log.Fatal("TELEGRAM_BOT_TOKEN is not set")
 	}
 	handlers.TelegramBot = telegram.NewBot(tgToken)
 
-	// ── Router ────────────────────────────────────────────────────────────────
 	r := chi.NewRouter()
-
-	// ── Middleware ────────────────────────────────────────────────────────────
 	r.Use(chiMiddleware.Logger)
 	r.Use(chiMiddleware.Recoverer)
 
-	// ── CORS ──────────────────────────────────────────────────────────────────
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{
+			"https://superlative-churros-7b7a0c.netlify.app",
 			"https://golden-bavarois-28286a.netlify.app",
 			"http://localhost:3000",
 			"http://localhost:8080",
@@ -50,7 +44,6 @@ func main() {
 		MaxAge:           300,
 	}))
 
-	// ── Public routes ─────────────────────────────────────────────────────────
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
@@ -60,12 +53,10 @@ func main() {
 	r.Post("/auth/verify-code", handlers.AuthVerifyCode)
 	r.Post("/auth/google", handlers.AuthGoogle)
 
-	// Telegram webhook
 	r.Post("/telegram/webhook", handlers.TelegramBot.WebhookHandler(func(phone string, chatID int64) {
 		handlers.PhoneChatIDs.Set(phone, chatID)
 	}))
 
-	// ── Protected routes ──────────────────────────────────────────────────────
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth)
 
@@ -74,11 +65,18 @@ func main() {
 		r.Delete("/me", handlers.DeleteMe)
 		r.Get("/users/{username}", handlers.GetUserByUsername)
 
+		r.Get("/meetings", handlers.ListMeetings)
+		r.Post("/meetings", handlers.CreateMeeting)
+		r.Get("/meetings/{id}", handlers.GetMeeting)
+		r.Put("/meetings/{id}", handlers.UpdateMeeting)
+		r.Delete("/meetings/{id}", handlers.DeleteMeeting)
+		r.Post("/meetings/{id}/join", handlers.JoinMeeting)
+		r.Delete("/meetings/{id}/join", handlers.LeaveMeeting)
+
 		r.Post("/push/subscribe", handlers.PushSubscribe)
 		r.Delete("/push/subscribe", handlers.PushUnsubscribe)
 	})
 
-	// ── Start server ──────────────────────────────────────────────────────────
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
