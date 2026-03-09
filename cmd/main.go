@@ -32,16 +32,10 @@ func main() {
 	r.Use(chiMiddleware.Recoverer)
 
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{
-			"https://superlative-churros-7b7a0c.netlify.app",
-			"https://golden-bavarois-28286a.netlify.app",
-			"http://localhost:3000",
-			"http://localhost:8080",
-		},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: true,
-		MaxAge:           300,
+    AllowedOrigins: []string{"*"},
+    AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+    AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
+    MaxAge:         300,
 	}))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
