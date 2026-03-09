@@ -11,7 +11,7 @@ COPY go.mod ./
 RUN rm -f go.sum && go mod download
 
 COPY . .
-RUN rm -f go.sum && CGO_ENABLED=0 GOOS=linux go build -mod=mod -o server ./cmd/main.go
+RUN rm -f go.sum && CGO_ENABLED=0 GOOS=linux go build -mod=mod -o server ./cmd/
 
 FROM alpine:3.19
 RUN apk --no-cache add ca-certificates tzdata
